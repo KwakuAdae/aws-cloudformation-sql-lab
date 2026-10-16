@@ -1,0 +1,147 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  SQL Query Lab: an Aurora PostgreSQL Serverless v2 database in its own VPC, with the
+  RDS Data API enabled so you can run SQL from the console Query Editor or the AWS CLI.
+  Scales to 0 ACUs (auto-pause) when idle to keep costs near zero.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: Database }
+        Parameters: [DatabaseName, MasterUsername, EngineVersion]
+      - Label: { default: Capacity and cost }
+        Parameters: [MinCapacity, MaxCapacity, SecondsUntilAutoPause]
+      - Label: { default: Network }
+        Parameters: [VpcCidr]
+
+Parameters:
+  DatabaseName:
+    Type: String
+    Default: shopdb
+    AllowedPattern: "^[a-z][a-z0-9_]{0,62}$"
+    Description: Name of the database created in the cluster
+  MasterUsername:
+    Type: String
+    Default: labadmin
+    AllowedPattern: "^[a-z][a-z0-9_]{0,15}$"
+    Description: Admin user name (the password is generated and stored in Secrets Manager)
+  EngineVersion:
+    Type: String
+    Default: "16.6"
+    Description: Aurora PostgreSQL version (16.3+ is needed to scale to 0 ACUs)
+  MinCapacity:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 4
+    Description: Minimum Aurora Capacity Units. 0 = pause when idle
+  MaxCapacity:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 16
+    Description: Maximum Aurora Capacity Units
+  SecondsUntilAutoPause:
+    Type: Number
+    Default: 600
+    MinValue: 300
+    MaxValue: 86400
+    Description: Idle seconds before the database pauses (only used when MinCapacity is 0)
+  VpcCidr:
+    Type: String
+    Default: 10.20.0.0/16
+    AllowedPattern: "^(\\d{1,3}\\.){3}\\d{1,3}/16$"
+    Description: CIDR block for the lab VPC (/16)
+
+Resources:
+  # ---------------- Network: private-only VPC (the Data API needs no inbound access) ----------------
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - { Key: Name, Value: !Sub "${AWS::StackName}-vpc" }
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 4, 8]]
+      Tags:
+        - { Key: Name, Value: !Sub "${AWS::StackName}-private-a" }
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 4, 8]]
+      Tags:
+        - { Key: Name, Value: !Sub "${AWS::StackName}-private-b" }
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets for the SQL lab database
+      SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SQL lab database - no inbound rules; access is through the RDS Data API
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: !Sub "${AWS::StackName}-db-sg" }
+
+  # ---------------- Database ----------------
+  DbCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Delete            # lab only: no final snapshot when the stack is deleted
+    UpdateReplacePolicy: Delete
+    Properties:
+      Engine: aurora-postgresql
+      EngineVersion: !Ref EngineVersion
+      DatabaseName: !Ref DatabaseName
+      MasterUsername: !Ref MasterUsername
+      ManageMasterUserPassword: true  # RDS generates the password and stores it in Secrets Manager
+      EnableHttpEndpoint: true        # turns on the RDS Data API (used by Query Editor and the CLI)
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: !Ref MinCapacity
+        MaxCapacity: !Ref MaxCapacity
+        SecondsUntilAutoPause: !Ref SecondsUntilAutoPause
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VpcSecurityGroupIds: [!Ref DbSecurityGroup]
+      StorageEncrypted: true
+      BackupRetentionPeriod: 1
+      DeletionProtection: false
+      Tags:
+        - { Key: project, Value: sql-lab }
+
+  DbInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBClusterIdentifier: !Ref DbCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-postgresql
+      PubliclyAccessible: false
+      Tags:
+        - { Key: project, Value: sql-lab }
+
+Outputs:
+  ClusterArn:
+    Description: Pass to `aws rds-data execute-statement --resource-arn`
+    Value: !Sub "arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:cluster:${DbCluster}"
+  SecretArn:
+    Description: Secrets Manager secret with the admin credentials (pass to --secret-arn)
+    Value: !GetAtt DbCluster.MasterUserSecret.SecretArn
+  DatabaseName:
+    Description: Database to connect to
+    Value: !Ref DatabaseName
+  ClusterEndpoint:
+    Description: Writer endpoint (only reachable from inside the VPC)
+    Value: !GetAtt DbCluster.Endpoint.Address

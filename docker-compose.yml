@@ -1,0 +1,17 @@
+# Optional: practise the SQL locally for free before (or instead of) deploying to AWS.
+#   docker compose up -d
+#   docker compose exec db psql -U labadmin -d shopdb -f /sql/lessons/01-select-basics.sql
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: labadmin
+      POSTGRES_PASSWORD: labpassword
+      POSTGRES_DB: shopdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./sql:/sql:ro
+      # schema + seed data load automatically on first start
+      - ./sql/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./sql/02-seed-data.sql:/docker-entrypoint-initdb.d/02-seed-data.sql:ro
