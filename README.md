@@ -366,9 +366,9 @@ A two-hour session costs **well under $1**. Delete the stack when you've finishe
 - Move the dataset into **Amazon Athena** and compare serverless SQL over S3
 - Turn the template into **nested stacks** (network + database)
 - Add **CloudWatch alarms** on `ServerlessDatabaseCapacity` and `ACUUtilization`
-- Sister labs: [ECS Fargate](https://github.com/KwakuAdae/aws-ecr-ecs-fargate-lab) ·
-  [EKS](https://github.com/KwakuAdae/kwakuadae-aws-eks-website-lab) ·
-  [API Gateway](https://github.com/KwakuAdae/aws-api-gateway-lab)
+- Sister labs: [ECS Fargate](https://github.com/KwakuAdae/aws-ecs-fargate-website-lab) ·
+  [EKS](https://github.com/KwakuAdae/aws-eks-website-lab) ·
+  [API Gateway](https://github.com/KwakuAdae/aws-serverless-tasks-api-lab)
 
 ## Troubleshooting
 
